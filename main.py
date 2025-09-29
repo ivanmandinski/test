@@ -280,6 +280,59 @@ async def delete_collection():
         logger.error(f"Error deleting collection: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to delete collection: {str(e)}")
 
+@app.post("/test-index")
+async def test_index():
+    """Test indexing with minimal data."""
+    if not search_system:
+        raise HTTPException(status_code=503, detail="Service not initialized")
+    
+    try:
+        # Create minimal test documents
+        test_docs = [
+            {
+                "id": "test1",
+                "title": "Energy Audit Services",
+                "slug": "energy-audit",
+                "type": "post",
+                "url": "https://www.scsengineers.com/energy-audit/",
+                "date": "2024-01-01",
+                "modified": "2024-01-01",
+                "author": "SCS Engineers",
+                "categories": [],
+                "tags": [],
+                "excerpt": "Professional energy audit services for industrial facilities.",
+                "content": "SCS Engineers provides comprehensive energy audit services to help industrial facilities reduce energy costs and improve efficiency. Our certified energy auditors use advanced tools and techniques to identify energy-saving opportunities.",
+                "word_count": 25
+            },
+            {
+                "id": "test2", 
+                "title": "Environmental Consulting",
+                "slug": "environmental-consulting",
+                "type": "post",
+                "url": "https://www.scsengineers.com/environmental-consulting/",
+                "date": "2024-01-02",
+                "modified": "2024-01-02",
+                "author": "SCS Engineers",
+                "categories": [],
+                "tags": [],
+                "excerpt": "Expert environmental consulting services.",
+                "content": "SCS Engineers offers environmental consulting services including environmental impact assessments, remediation planning, and regulatory compliance assistance.",
+                "word_count": 20
+            }
+        ]
+        
+        # Index test documents
+        success = await search_system.index_documents(test_docs)
+        
+        if success:
+            return {"message": "Test indexing successful", "documents": len(test_docs)}
+        else:
+            raise HTTPException(status_code=500, detail="Test indexing failed")
+            
+    except Exception as e:
+        logger.error(f"Test indexing error: {e}")
+        raise HTTPException(status_code=500, detail=f"Test indexing failed: {str(e)}")
+
 @app.get("/stats")
 async def get_stats():
     """Get indexing and search statistics."""

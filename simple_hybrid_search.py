@@ -41,32 +41,37 @@ class SimpleHybridSearch:
             document_texts = []
             
             for doc in documents:
-                # Create combined text for embedding
-                combined_text = f"{doc['title']} {doc['content']}"
-                document_texts.append(combined_text)
-                
-                # Get embedding from Cerebras
-                embedding = await self._get_embedding(combined_text)
-                
-                # Prepare sparse vector
-                processed_doc = {
-                    'id': doc['id'],
-                    'title': doc['title'],
-                    'slug': doc['slug'],
-                    'type': doc['type'],
-                    'url': doc['url'],
-                    'date': doc['date'],
-                    'modified': doc['modified'],
-                    'author': doc['author'],
-                    'categories': doc['categories'],
-                    'tags': doc['tags'],
-                    'excerpt': doc['excerpt'],
-                    'content': doc['content'],
-                    'word_count': doc['word_count'],
-                    'embedding': embedding,
-                    'sparse_vector': {}  # Will be filled after TF-IDF fitting
-                }
-                processed_docs.append(processed_doc)
+                try:
+                    # Create combined text for embedding
+                    combined_text = f"{doc['title']} {doc['content']}"
+                    document_texts.append(combined_text)
+                    
+                    # Get embedding from Cerebras
+                    embedding = await self._get_embedding(combined_text)
+                    
+                    # Prepare sparse vector
+                    processed_doc = {
+                        'id': doc['id'],
+                        'title': doc['title'],
+                        'slug': doc['slug'],
+                        'type': doc['type'],
+                        'url': doc['url'],
+                        'date': doc['date'],
+                        'modified': doc['modified'],
+                        'author': doc['author'],
+                        'categories': doc['categories'],
+                        'tags': doc['tags'],
+                        'excerpt': doc['excerpt'],
+                        'content': doc['content'],
+                        'word_count': doc['word_count'],
+                        'embedding': embedding,
+                        'sparse_vector': {}  # Will be filled after TF-IDF fitting
+                    }
+                    processed_docs.append(processed_doc)
+                    
+                except Exception as e:
+                    logger.error(f"Error processing document {doc.get('id', 'unknown')}: {e}")
+                    continue
             
             # Fit TF-IDF on all documents
             self.tfidf_matrix = self.tfidf_vectorizer.fit_transform(document_texts)
@@ -76,6 +81,9 @@ class SimpleHybridSearch:
             for i, doc in enumerate(processed_docs):
                 sparse_vector = self._get_sparse_vector(document_texts[i])
                 doc['sparse_vector'] = sparse_vector
+            
+            # Store documents in memory for TF-IDF search
+            self.documents = processed_docs
             
             # Index in Qdrant
             success = self.qdrant_manager.upsert_documents(processed_docs)

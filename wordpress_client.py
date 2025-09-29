@@ -104,92 +104,166 @@ class WordPressContentFetcher:
         if not html_content:
             return ""
         
-        soup = BeautifulSoup(html_content, 'html.parser')
-        
-        # Remove script and style elements
-        for script in soup(["script", "style"]):
-            script.decompose()
-        
-        # Get text content
-        text = soup.get_text()
-        
-        # Clean up whitespace
-        lines = (line.strip() for line in text.splitlines())
-        chunks = (phrase.strip() for line in lines for phrase in line.split("  "))
-        text = ' '.join(chunk for chunk in chunks if chunk)
-        
-        return text
+        try:
+            soup = BeautifulSoup(html_content, 'html.parser')
+            
+            # Remove script and style elements
+            for script in soup(["script", "style"]):
+                script.decompose()
+            
+            # Get text content
+            text = soup.get_text()
+            
+            # Clean up whitespace
+            lines = (line.strip() for line in text.splitlines())
+            chunks = (phrase.strip() for line in lines for phrase in line.split("  "))
+            text = ' '.join(chunk for chunk in chunks if chunk)
+            
+            # Limit text length to prevent issues
+            if len(text) > 10000:
+                text = text[:10000] + "..."
+            
+            return text
+            
+        except Exception as e:
+            logger.error(f"Error cleaning HTML content: {e}")
+            # Return a safe fallback
+            return "Content processing error"
     
     def process_content_item(self, item: Dict[str, Any]) -> Dict[str, Any]:
         """Process a single WordPress content item."""
-        # Extract basic information
-        processed = {
-            "id": item["id"],
-            "title": item["title"]["rendered"],
-            "slug": item["slug"],
-            "type": item["type"],
-            "url": item["link"],
-            "date": item["date"],
-            "modified": item["modified"],
-            "author": item.get("_embedded", {}).get("author", [{}])[0].get("name", "Unknown"),
-            "categories": [],
-            "tags": [],
-            "excerpt": "",
-            "content": "",
-            "word_count": 0
-        }
-        
-        # Clean and extract content
-        raw_content = item["content"]["rendered"]
-        processed["content"] = self.clean_html_content(raw_content)
-        processed["word_count"] = len(processed["content"].split())
-        
-        # Extract excerpt
-        if item.get("excerpt", {}).get("rendered"):
-            processed["excerpt"] = self.clean_html_content(item["excerpt"]["rendered"])
-        
-        # Extract categories
-        if "_embedded" in item and "wp:term" in item["_embedded"]:
-            for term_group in item["_embedded"]["wp:term"]:
-                for term in term_group:
-                    if term["taxonomy"] == "category":
-                        processed["categories"].append({
-                            "id": term["id"],
-                            "name": term["name"],
-                            "slug": term["slug"]
-                        })
-                    elif term["taxonomy"] == "post_tag":
-                        processed["tags"].append({
-                            "id": term["id"],
-                            "name": term["name"],
-                            "slug": term["slug"]
-                        })
-        
-        return processed
+        try:
+            # Extract basic information with safe defaults
+            processed = {
+                "id": str(item.get("id", "")),
+                "title": self._safe_get_text(item.get("title", {}), "rendered", ""),
+                "slug": str(item.get("slug", "")),
+                "type": str(item.get("type", "post")),
+                "url": str(item.get("link", "")),
+                "date": str(item.get("date", "")),
+                "modified": str(item.get("modified", "")),
+                "author": self._safe_get_author(item),
+                "categories": [],
+                "tags": [],
+                "excerpt": "",
+                "content": "",
+                "word_count": 0
+            }
+            
+            # Clean and extract content
+            raw_content = self._safe_get_text(item.get("content", {}), "rendered", "")
+            processed["content"] = self.clean_html_content(raw_content)
+            processed["word_count"] = len(processed["content"].split())
+            
+            # Extract excerpt
+            excerpt_raw = self._safe_get_text(item.get("excerpt", {}), "rendered", "")
+            if excerpt_raw:
+                processed["excerpt"] = self.clean_html_content(excerpt_raw)
+            
+            # Extract categories and tags safely
+            try:
+                if "_embedded" in item and "wp:term" in item["_embedded"]:
+                    for term_group in item["_embedded"]["wp:term"]:
+                        for term in term_group:
+                            if term.get("taxonomy") == "category":
+                                processed["categories"].append({
+                                    "id": str(term.get("id", "")),
+                                    "name": str(term.get("name", "")),
+                                    "slug": str(term.get("slug", ""))
+                                })
+                            elif term.get("taxonomy") == "post_tag":
+                                processed["tags"].append({
+                                    "id": str(term.get("id", "")),
+                                    "name": str(term.get("name", "")),
+                                    "slug": str(term.get("slug", ""))
+                                })
+            except Exception as e:
+                logger.error(f"Error processing categories/tags: {e}")
+            
+            return processed
+            
+        except Exception as e:
+            logger.error(f"Error processing content item: {e}")
+            # Return minimal safe structure
+            return {
+                "id": str(item.get("id", "unknown")),
+                "title": "Processing Error",
+                "slug": "",
+                "type": "post",
+                "url": "",
+                "date": "",
+                "modified": "",
+                "author": "Unknown",
+                "categories": [],
+                "tags": [],
+                "excerpt": "",
+                "content": "Content processing error",
+                "word_count": 0
+            }
+    
+    def _safe_get_text(self, obj: Dict, key: str, default: str = "") -> str:
+        """Safely get text from nested dictionary."""
+        try:
+            value = obj.get(key, default)
+            if isinstance(value, str):
+                # Remove any problematic characters
+                return value.replace('\x00', '').replace('\r', '').replace('\n', ' ')[:5000]
+            return str(value)[:5000] if value else default
+        except:
+            return default
+    
+    def _safe_get_author(self, item: Dict) -> str:
+        """Safely get author name."""
+        try:
+            embedded = item.get("_embedded", {})
+            authors = embedded.get("author", [])
+            if authors and len(authors) > 0:
+                return str(authors[0].get("name", "Unknown"))
+            return "Unknown"
+        except:
+            return "Unknown"
     
     async def get_all_content(self) -> List[Dict[str, Any]]:
         """Fetch and process all WordPress content."""
         logger.info("Starting content fetch from WordPress...")
         
-        # Fetch posts and pages concurrently
-        posts_task = self.fetch_all_posts()
-        pages_task = self.fetch_all_pages()
-        
-        posts, pages = await asyncio.gather(posts_task, pages_task)
-        
-        # Process all content
-        all_content = []
-        
-        for post in posts:
-            processed_post = self.process_content_item(post)
-            all_content.append(processed_post)
-        
-        for page in pages:
-            processed_page = self.process_content_item(page)
-            all_content.append(processed_page)
-        
-        logger.info(f"Processed {len(all_content)} content items")
-        return all_content
+        try:
+            # Fetch posts and pages concurrently
+            posts_task = self.fetch_all_posts()
+            pages_task = self.fetch_all_pages()
+            
+            posts, pages = await asyncio.gather(posts_task, pages_task)
+            
+            # Process all content with error handling
+            all_content = []
+            
+            # Process posts
+            for i, post in enumerate(posts):
+                try:
+                    processed_post = self.process_content_item(post)
+                    all_content.append(processed_post)
+                    if i % 100 == 0:
+                        logger.info(f"Processed {i} posts...")
+                except Exception as e:
+                    logger.error(f"Error processing post {i}: {e}")
+                    continue
+            
+            # Process pages
+            for i, page in enumerate(pages):
+                try:
+                    processed_page = self.process_content_item(page)
+                    all_content.append(processed_page)
+                except Exception as e:
+                    logger.error(f"Error processing page {i}: {e}")
+                    continue
+            
+            logger.info(f"Successfully processed {len(all_content)} content items")
+            return all_content
+            
+        except Exception as e:
+            logger.error(f"Error in get_all_content: {e}")
+            # Return empty list to prevent complete failure
+            return []
     
     async def close(self):
         """Close the HTTP client."""
