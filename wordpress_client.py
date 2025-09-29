@@ -16,9 +16,15 @@ class WordPressContentFetcher:
     
     def __init__(self):
         self.base_url = settings.wordpress_api_url
-        self.auth = (settings.wordpress_username, settings.wordpress_password)
+        # Only use auth if credentials are provided
+        auth = None
+        if settings.wordpress_username and settings.wordpress_password and \
+           settings.wordpress_username != "your_wp_username" and \
+           settings.wordpress_password != "your_wp_app_password":
+            auth = (settings.wordpress_username, settings.wordpress_password)
+        
         self.client = httpx.AsyncClient(
-            auth=self.auth,
+            auth=auth,
             timeout=30.0,
             headers={"User-Agent": "HybridSearchBot/1.0"}
         )

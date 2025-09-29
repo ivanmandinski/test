@@ -13,6 +13,15 @@
     });
     
     function initializeHybridSearch() {
+        // Debug: Log configuration
+        console.log('Hybrid Search initialized with config:', {
+            ajaxUrl: hybridSearch.ajaxUrl,
+            apiUrl: hybridSearch.apiUrl,
+            maxResults: hybridSearch.maxResults,
+            includeAnswer: hybridSearch.includeAnswer,
+            hasNonce: !!hybridSearch.nonce
+        });
+        
         // Get search query from URL
         const urlParams = new URLSearchParams(window.location.search);
         const query = urlParams.get('s') || '';
@@ -74,16 +83,30 @@
             timeout: 30000,
             success: function(response) {
                 hideLoading();
+                console.log('Search response:', response);
                 
                 if (response.success && response.data) {
                     displayResults(response.data);
                 } else {
-                    showError(response.data?.error || 'Search failed');
+                    showError(response.data?.error || response.data?.message || 'Search failed');
                 }
             },
             error: function(xhr, status, error) {
                 hideLoading();
-                showError('Network error: ' + error);
+                console.error('Search error:', xhr, status, error);
+                console.error('Response text:', xhr.responseText);
+                
+                let errorMessage = 'Network error: ' + error;
+                if (xhr.responseText) {
+                    try {
+                        const errorData = JSON.parse(xhr.responseText);
+                        errorMessage = errorData.data?.message || errorData.message || errorMessage;
+                    } catch (e) {
+                        errorMessage = xhr.responseText || errorMessage;
+                    }
+                }
+                
+                showError(errorMessage);
             }
         });
     }

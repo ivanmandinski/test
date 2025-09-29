@@ -264,6 +264,22 @@ async def index_content(request: IndexRequest, background_tasks: BackgroundTasks
         raise HTTPException(status_code=500, detail=f"Indexing failed: {str(e)}")
 
 
+@app.delete("/collection")
+async def delete_collection():
+    """Delete the search collection."""
+    if not search_system:
+        raise HTTPException(status_code=503, detail="Service not initialized")
+    
+    try:
+        success = search_system.qdrant_manager.delete_collection()
+        if success:
+            return {"message": "Collection deleted successfully"}
+        else:
+            raise HTTPException(status_code=500, detail="Failed to delete collection")
+    except Exception as e:
+        logger.error(f"Error deleting collection: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to delete collection: {str(e)}")
+
 @app.get("/stats")
 async def get_stats():
     """Get indexing and search statistics."""

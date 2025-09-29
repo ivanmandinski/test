@@ -19,6 +19,9 @@ class Settings(BaseSettings):
     cerebras_api_key: str
     cerebras_model: str = "cerebras-llama-2-7b-chat"
     
+    # OpenAI Configuration (for embeddings)
+    openai_api_key: str = ""
+    
     # Embedding and Sparse Models
     embed_model: str = "text-embedding-ada-002"
     sparse_model: str = "tfidf"
@@ -38,7 +41,7 @@ class Settings(BaseSettings):
     # Search Configuration
     max_search_results: int = 10
     search_timeout: int = 30
-    embedding_dimension: int = 1536
+    embedding_dimension: int = 384
     chunk_size: int = 512
     default_site_base: str = ""
     search_page_title: str = "Hybrid Search"
