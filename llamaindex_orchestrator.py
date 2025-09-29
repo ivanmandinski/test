@@ -3,19 +3,19 @@ LlamaIndex orchestration for indexing and querying.
 """
 import logging
 from typing import List, Dict, Any, Optional, Tuple
-from llama_index.core import (
+from llama_index import (
     Document, VectorStoreIndex, StorageContext, 
     Settings, SimpleDirectoryReader
 )
-from llama_index.core.node_parser import SentenceSplitter
-from llama_index.core.retrievers import VectorIndexRetriever
-from llama_index.core.query_engine import RetrieverQueryEngine
+from llama_index.node_parser import SentenceSplitter
+from llama_index.retrievers import VectorIndexRetriever
+from llama_index.query_engine import RetrieverQueryEngine
 from llama_index.vector_stores.qdrant import QdrantVectorStore
 from llama_index.embeddings.openai import OpenAIEmbedding
 from llama_index.llms.openai import OpenAI
-from llama_index.core.schema import NodeWithScore
-from llama_index.core.retrievers import BaseRetriever
-from llama_index.core.query_engine import BaseQueryEngine
+from llama_index.schema import NodeWithScore
+from llama_index.retrievers import BaseRetriever
+from llama_index.query_engine import BaseQueryEngine
 import numpy as np
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity

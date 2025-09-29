@@ -13,7 +13,7 @@ import uvicorn
 
 from config import settings
 from wordpress_client import WordPressContentFetcher
-from llamaindex_orchestrator import LlamaIndexOrchestrator
+from simple_hybrid_search import SimpleHybridSearch
 from cerebras_llm import CerebrasLLM
 
 # Configure logging
@@ -37,7 +37,7 @@ app.add_middleware(
 )
 
 # Global instances
-orchestrator = None
+search_system = None
 llm_client = None
 wp_client = None
 
@@ -80,13 +80,13 @@ class HealthResponse(BaseModel):
 @app.on_event("startup")
 async def startup_event():
     """Initialize services on startup."""
-    global orchestrator, llm_client, wp_client
+    global search_system, llm_client, wp_client
     
     try:
         logger.info("Starting hybrid search service...")
         
         # Initialize services
-        orchestrator = LlamaIndexOrchestrator()
+        search_system = SimpleHybridSearch()
         llm_client = CerebrasLLM()
         wp_client = WordPressContentFetcher()
         
@@ -105,11 +105,11 @@ async def startup_event():
 @app.on_event("shutdown")
 async def shutdown_event():
     """Clean up resources on shutdown."""
-    global orchestrator, wp_client
+    global search_system, wp_client
     
     try:
-        if orchestrator:
-            orchestrator.close()
+        if search_system:
+            search_system.close()
         if wp_client:
             await wp_client.close()
         logger.info("Hybrid search service shutdown completed")
@@ -136,8 +136,8 @@ async def health_check():
     
     try:
         # Check Qdrant connection
-        if orchestrator:
-            stats = orchestrator.get_index_stats()
+        if search_system:
+            stats = search_system.get_stats()
             services_status["qdrant"] = "healthy" if stats.get('total_documents', 0) >= 0 else "unhealthy"
         else:
             services_status["qdrant"] = "not_initialized"
@@ -174,7 +174,7 @@ async def health_check():
 @app.post("/search", response_model=SearchResponse)
 async def search(request: SearchRequest):
     """Perform hybrid search on indexed content."""
-    if not orchestrator:
+    if not search_system:
         raise HTTPException(status_code=503, detail="Search service not initialized")
     
     start_time = datetime.utcnow()
@@ -189,16 +189,17 @@ async def search(request: SearchRequest):
             search_query = request.query
         
         # Perform search
-        results = orchestrator.search(search_query, limit=request.limit)
+        if request.include_answer:
+            result = await search_system.search_with_answer(search_query, limit=request.limit)
+            results = result.get('sources', [])
+            answer = result.get('answer')
+        else:
+            results = await search_system.search(search_query, limit=request.limit)
+            answer = None
         
         # Apply filters if provided
         if request.filters:
             results = _apply_filters(results, request.filters)
-        
-        # Generate answer if requested
-        answer = None
-        if request.include_answer and llm_client and results:
-            answer = llm_client.generate_answer(request.query, results)
         
         processing_time = (datetime.utcnow() - start_time).total_seconds()
         
@@ -219,14 +220,14 @@ async def search(request: SearchRequest):
 @app.post("/index", response_model=IndexResponse)
 async def index_content(request: IndexRequest, background_tasks: BackgroundTasks):
     """Index WordPress content."""
-    if not orchestrator or not wp_client:
+    if not search_system or not wp_client:
         raise HTTPException(status_code=503, detail="Indexing service not initialized")
     
     start_time = datetime.utcnow()
     
     try:
         # Check if index already exists
-        stats = orchestrator.get_index_stats()
+        stats = search_system.get_stats()
         if stats.get('total_documents', 0) > 0 and not request.force_reindex:
             return IndexResponse(
                 success=True,
@@ -244,7 +245,7 @@ async def index_content(request: IndexRequest, background_tasks: BackgroundTasks
         
         # Index documents
         logger.info(f"Indexing {len(documents)} documents...")
-        success = orchestrator.index_documents(documents)
+        success = await search_system.index_documents(documents)
         
         if not success:
             raise HTTPException(status_code=500, detail="Failed to index documents")
@@ -266,11 +267,11 @@ async def index_content(request: IndexRequest, background_tasks: BackgroundTasks
 @app.get("/stats")
 async def get_stats():
     """Get indexing and search statistics."""
-    if not orchestrator:
+    if not search_system:
         raise HTTPException(status_code=503, detail="Service not initialized")
     
     try:
-        stats = orchestrator.get_index_stats()
+        stats = search_system.get_stats()
         return {
             "index_stats": stats,
             "service_info": {
