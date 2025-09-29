@@ -31,7 +31,7 @@ class SimpleHybridSearch:
         self.documents = []
         self.document_texts = []
         
-        # Initialize with sample data for testing
+        # Initialize with sample data for testing (fallback)
         self._initialize_with_sample_data()
     
     def _initialize_with_sample_data(self):
@@ -106,6 +106,10 @@ class SimpleHybridSearch:
         try:
             logger.info(f"Indexing {len(documents)} documents...")
             
+            if not documents:
+                logger.warning("No documents to index")
+                return False
+            
             # Prepare documents for indexing
             processed_docs = []
             document_texts = []
@@ -142,6 +146,10 @@ class SimpleHybridSearch:
                 except Exception as e:
                     logger.error(f"Error processing document {doc.get('id', 'unknown')}: {e}")
                     continue
+            
+            if not processed_docs:
+                logger.error("No documents were successfully processed")
+                return False
             
             # Fit TF-IDF on all documents
             self.tfidf_matrix = self.tfidf_vectorizer.fit_transform(document_texts)

@@ -33,7 +33,7 @@ class WordPressContentFetcher:
         """Fetch all published posts from WordPress."""
         posts = []
         page = 1
-        per_page = 100
+        per_page = 50  # Reduced batch size to avoid large responses
         
         while True:
             try:
@@ -43,7 +43,7 @@ class WordPressContentFetcher:
                         "per_page": per_page,
                         "page": page,
                         "status": "publish",
-                        "_embed": True
+                        "_embed": False  # Disable embedding to reduce response size
                     }
                 )
                 response.raise_for_status()
@@ -51,14 +51,27 @@ class WordPressContentFetcher:
                 batch_posts = response.json()
                 if not batch_posts:
                     break
-                    
-                posts.extend(batch_posts)
+                
+                # Process posts one by one to handle errors gracefully
+                for post in batch_posts:
+                    try:
+                        # Clean and validate post data
+                        cleaned_post = self._clean_post_data(post)
+                        if cleaned_post:
+                            posts.append(cleaned_post)
+                    except Exception as e:
+                        logger.error(f"Error processing post {post.get('id', 'unknown')}: {e}")
+                        continue
+                
                 page += 1
+                logger.info(f"Fetched {len(batch_posts)} posts (page {page-1}), total: {len(posts)}")
                 
-                logger.info(f"Fetched {len(batch_posts)} posts from page {page-1}")
+                # Limit to prevent infinite loops
+                if page > 50:  # Max 50 pages = 2500 posts
+                    break
                 
-            except httpx.HTTPError as e:
-                logger.error(f"Error fetching posts: {e}")
+            except Exception as e:
+                logger.error(f"Error fetching posts page {page}: {e}")
                 break
         
         logger.info(f"Total posts fetched: {len(posts)}")
@@ -68,7 +81,7 @@ class WordPressContentFetcher:
         """Fetch all published pages from WordPress."""
         pages = []
         page = 1
-        per_page = 100
+        per_page = 50  # Reduced batch size
         
         while True:
             try:
@@ -78,7 +91,7 @@ class WordPressContentFetcher:
                         "per_page": per_page,
                         "page": page,
                         "status": "publish",
-                        "_embed": True
+                        "_embed": False  # Disable embedding
                     }
                 )
                 response.raise_for_status()
@@ -86,14 +99,26 @@ class WordPressContentFetcher:
                 batch_pages = response.json()
                 if not batch_pages:
                     break
-                    
-                pages.extend(batch_pages)
+                
+                # Process pages one by one
+                for page_item in batch_pages:
+                    try:
+                        cleaned_page = self._clean_post_data(page_item)
+                        if cleaned_page:
+                            pages.append(cleaned_page)
+                    except Exception as e:
+                        logger.error(f"Error processing page {page_item.get('id', 'unknown')}: {e}")
+                        continue
+                
                 page += 1
+                logger.info(f"Fetched {len(batch_pages)} pages (page {page-1}), total: {len(pages)}")
                 
-                logger.info(f"Fetched {len(batch_pages)} pages from page {page-1}")
+                # Limit to prevent infinite loops
+                if page > 20:  # Max 20 pages = 1000 pages
+                    break
                 
-            except httpx.HTTPError as e:
-                logger.error(f"Error fetching pages: {e}")
+            except Exception as e:
+                logger.error(f"Error fetching pages page {page}: {e}")
                 break
         
         logger.info(f"Total pages fetched: {len(pages)}")
@@ -223,6 +248,46 @@ class WordPressContentFetcher:
         except:
             return "Unknown"
     
+    def _clean_post_data(self, post: Dict[str, Any]) -> Dict[str, Any]:
+        """Clean and validate post data."""
+        try:
+            # Extract and clean basic fields
+            cleaned = {
+                "id": str(post.get("id", "")),
+                "title": self._safe_get_text(post.get("title", {}), "rendered", ""),
+                "slug": str(post.get("slug", "")),
+                "type": str(post.get("type", "post")),
+                "url": str(post.get("link", "")),
+                "date": str(post.get("date", "")),
+                "modified": str(post.get("modified", "")),
+                "author": "SCS Engineers",  # Default author
+                "categories": [],
+                "tags": [],
+                "excerpt": "",
+                "content": "",
+                "word_count": 0
+            }
+            
+            # Clean content
+            raw_content = self._safe_get_text(post.get("content", {}), "rendered", "")
+            cleaned["content"] = self.clean_html_content(raw_content)
+            cleaned["word_count"] = len(cleaned["content"].split())
+            
+            # Clean excerpt
+            excerpt_raw = self._safe_get_text(post.get("excerpt", {}), "rendered", "")
+            if excerpt_raw:
+                cleaned["excerpt"] = self.clean_html_content(excerpt_raw)
+            
+            # Skip if content is too short or empty
+            if len(cleaned["content"]) < 50:
+                return None
+            
+            return cleaned
+            
+        except Exception as e:
+            logger.error(f"Error cleaning post data: {e}")
+            return None
+    
     async def get_all_content(self) -> List[Dict[str, Any]]:
         """Fetch and process all WordPress content."""
         logger.info("Starting content fetch from WordPress...")
@@ -234,30 +299,10 @@ class WordPressContentFetcher:
             
             posts, pages = await asyncio.gather(posts_task, pages_task)
             
-            # Process all content with error handling
-            all_content = []
+            # Combine all content (already cleaned)
+            all_content = posts + pages
             
-            # Process posts
-            for i, post in enumerate(posts):
-                try:
-                    processed_post = self.process_content_item(post)
-                    all_content.append(processed_post)
-                    if i % 100 == 0:
-                        logger.info(f"Processed {i} posts...")
-                except Exception as e:
-                    logger.error(f"Error processing post {i}: {e}")
-                    continue
-            
-            # Process pages
-            for i, page in enumerate(pages):
-                try:
-                    processed_page = self.process_content_item(page)
-                    all_content.append(processed_page)
-                except Exception as e:
-                    logger.error(f"Error processing page {i}: {e}")
-                    continue
-            
-            logger.info(f"Successfully processed {len(all_content)} content items")
+            logger.info(f"Successfully fetched {len(all_content)} content items ({len(posts)} posts, {len(pages)} pages)")
             return all_content
             
         except Exception as e:
